@@ -49,9 +49,9 @@ export default {
 			}
 			if (method === 'POST' && path === '/leads') {
 				const ip = request.headers.get('CF-Connecting-IP') || '127.0.0.1';
-				const { success } = await env.LEADS_LIMITER.limit({key: ip})
+				const { success } = await env.LEADS_LIMITER.limit({ key: ip });
 
-				if(!success) {
+				if (!success) {
 					return sendJson({ error: 'Перевищено ліміт запитів. Спробуйте пізніше' }, 429);
 				}
 
@@ -77,7 +77,7 @@ export default {
 					.first();
 
 				if (!createdLead) {
-					console.error('Не вдалося створити лід');
+					console.error('Помилка при додаванні ліда:', email, new Date().toISOString());
 					return sendJson({ error: 'Внутрішня помилка сервера' }, 500);
 				}
 
@@ -86,7 +86,7 @@ export default {
 				const emailEnabled = await env.LEADS_KV.get('settings:lead_email_enabled');
 
 				if (emailEnabled === 'true') {
-					console.log('Email notification sent for lead:', email);
+					console.log('Пройшла відправка email:', email);
 				}
 
 				return sendJson(createdLead, 201);
@@ -146,7 +146,10 @@ export default {
 					)
 					.first();
 
-				if (!leadStatsCount) return sendJson({ error: 'Статистика не знайдена' }, 404);
+				if (!leadStatsCount) {
+					console.error('Статистика не знайдена: ', new Date().toISOString());
+					return sendJson({ error: 'Внутрішня помилка сервера' }, 500);
+				}
 
 				return sendJson(leadStatsCount, 200);
 			}
@@ -205,7 +208,13 @@ export default {
 
 			return sendJson({ error: 'Маршрут не знайдено' }, 404);
 		} catch (error: unknown) {
-			console.error('Глобальна помилка сервера:', error);
+			console.error('Unhandled error:', {
+				message: error instanceof Error ? error.message : 'Unknown',
+				stack: error instanceof Error ? error.stack : undefined,
+				path,
+				method,
+				timestamp: new Date().toISOString(),
+			});
 			return sendJson({ error: 'Внутрішня помилка сервера' }, 500);
 		}
 	},
