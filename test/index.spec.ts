@@ -1,26 +1,61 @@
-import {
-	env,
-	createExecutionContext,
-	waitOnExecutionContext,
-	SELF,
-} from "cloudflare:test";
-import { describe, it, expect } from "vitest";
-import worker from "../src/index";
+import { SELF } from 'cloudflare:test';
+import { describe, it, expect } from 'vitest';
 
+describe('Auth test', () => {
+	it('Blocking unauthorized access', async () => {
+		const response = await SELF.fetch('http://localhost:8787/leads');
+		expect(response.status).toBe(401);
 
-const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
+		const body = (await response.json()) as { error: string };
 
-describe("Hello World worker", () => {
-	it("responds with Hello World! (unit style)", async () => {
-		const request = new IncomingRequest("http://example.com");
-		const ctx = createExecutionContext();
-		const response = await worker.fetch(request, env, ctx);
-		await waitOnExecutionContext(ctx);
-		expect(await response.text()).toMatchInlineSnapshot(`"Hello World!"`);
+		expect(body.error).toBe('Неавторизовано');
 	});
 
-	it("responds with Hello World! (integration style)", async () => {
-		const response = await SELF.fetch("https://example.com");
-		expect(await response.text()).toMatchInlineSnapshot(`"Hello World!"`);
+	it('Blocking access with invalid token', async () => {
+		const response = await SELF.fetch('http://localhost:8787/leads', {
+			headers: {
+				Authorization: 'Bearer invalid-token',
+			},
+		});
+		expect(response.status).toBe(401);
+		const body = (await response.json()) as { error: string };
+		expect(body.error).toBe('Неавторизовано');
+	});
+
+	it('Public access to /POST', async () => {
+		const response = await SELF.fetch('http://localhost:8787/leads', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify({
+				name: 'Test user',
+				email: 'testUser@gmai.com',
+				message: 'this test user',
+			}),
+		});
+
+		expect([201, 429]).toContain(response.status);
+	});
+
+	it('Test cache concurency', async () => {
+		const url = 'http://localhost:8787/leads';
+		const body = JSON.stringify({ name: 'Test', email: 'test@test.com' });
+		const headers = { 'Content-Type': 'application/json' };
+
+		const requests = Array.from({ length: 6 }, () =>
+			SELF.fetch(url, {
+				method: 'POST',
+				headers,
+				body,
+			}),
+		);
+		const responses = await Promise.all(requests);
+		const statuses = responses.map((response) => response.status);
+
+		const successCount = statuses.filter((status) => status === 201).length;
+		expect(successCount).toBeLessThanOrEqual(3);
+		expect(statuses).toContain(429);
+		console.log(statuses);
 	});
 });

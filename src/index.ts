@@ -1,19 +1,21 @@
-import type { Env } from './interface/env.interface';
-import type { RateLimitData } from './interface/ratelimit.interface';
 import type { CreateLeadInput } from './interface/lead.interface';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const statuses = ['new', 'contacted', 'closed'];
 
 async function clearCache(env: Env) {
-	const listOfKeys = await env.LEADS_KV.list({ prefix: 'leads:list:' });
-	for (const key of listOfKeys.keys) {
-		await env.LEADS_KV.delete(key.name);
-	}
+	let cursor: string | undefined = undefined;
+	do {
+		const listOfKeys: KVNamespaceListResult<string> = await env.LEADS_KV.list({ prefix: 'leads:list:', cursor });
+		for (const key of listOfKeys.keys) {
+			await env.LEADS_KV.delete(key.name);
+		}
+		cursor = listOfKeys.list_complete ? undefined : listOfKeys.cursor;
+	} while (cursor);
 }
 
 export default {
-	async fetch(request: Request, env: Env): Promise<Response> {
+	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
 		const path = url.pathname;
 		const method = request.method;
@@ -47,29 +49,10 @@ export default {
 			}
 			if (method === 'POST' && path === '/leads') {
 				const ip = request.headers.get('CF-Connecting-IP') || '127.0.0.1';
-				const kvKey = `rate_limit:${ip}`;
+				const { success } = await env.LEADS_LIMITER.limit({key: ip})
 
-				const currentRequests = await env.LEADS_KV.get(kvKey);
-				const nowInSeconds = Math.floor(Date.now() / 1000);
-
-				if (currentRequests === null) {
-					const expiresAt = nowInSeconds + 60;
-					const limitData: RateLimitData = { count: 1, expiresAt };
-
-					await env.LEADS_KV.put(kvKey, JSON.stringify(limitData), { expirationTtl: 60 });
-				} else {
-					const limitData = JSON.parse(currentRequests) as RateLimitData;
-
-					if (limitData.count >= 3) {
-						return sendJson({ error: 'Перевищено ліміт запитів. Спробуйте пізніше' }, 429);
-					}
-
-					const updatedData: RateLimitData = {
-						count: limitData.count + 1,
-						expiresAt: limitData.expiresAt,
-					};
-
-					await env.LEADS_KV.put(kvKey, JSON.stringify(updatedData), { expirationTtl: 60 });
+				if(!success) {
+					return sendJson({ error: 'Перевищено ліміт запитів. Спробуйте пізніше' }, 429);
 				}
 
 				let body: CreateLeadInput;
@@ -93,9 +76,12 @@ export default {
 					.bind(name, email, company, message, createdAt)
 					.first();
 
-				if (!createdLead) return sendJson({ error: 'Не вдалося створити запис у базі даних' }, 500);
+				if (!createdLead) {
+					console.error('Не вдалося створити лід');
+					return sendJson({ error: 'Внутрішня помилка сервера' }, 500);
+				}
 
-				await clearCache(env);
+				ctx.waitUntil(clearCache(env));
 
 				const emailEnabled = await env.LEADS_KV.get('settings:lead_email_enabled');
 
@@ -201,7 +187,7 @@ export default {
 
 					if (!result) return sendJson({ error: 'Лід не знайдений' }, 404);
 
-					await clearCache(env);
+					ctx.waitUntil(clearCache(env));
 
 					return sendJson(result, 200);
 				}
@@ -211,7 +197,7 @@ export default {
 
 					if (!result) return sendJson({ error: 'Лід не знайдений для видалення' }, 404);
 
-					await clearCache(env);
+					ctx.waitUntil(clearCache(env));
 
 					return sendJson({ message: `Лід з ID ${leadId} успішно видалено` }, 200);
 				}
@@ -220,13 +206,7 @@ export default {
 			return sendJson({ error: 'Маршрут не знайдено' }, 404);
 		} catch (error: unknown) {
 			console.error('Глобальна помилка сервера:', error);
-			return sendJson(
-				{
-					error: 'Внутрішня помилка сервера',
-					details: error instanceof Error ? error.message : 'Невідома помилка',
-				},
-				500,
-			);
+			return sendJson({ error: 'Внутрішня помилка сервера' }, 500);
 		}
 	},
 } satisfies ExportedHandler<Env>;

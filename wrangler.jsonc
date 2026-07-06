@@ -7,9 +7,7 @@
 		"enabled": true,
 	},
 	"upload_source_maps": true,
-	"compatibility_flags": [
-		"nodejs_compat"
-	],
+	"compatibility_flags": ["nodejs_compat"],
 	"d1_databases": [
 		{
 			"binding": "mini_lead_tracker_db",
@@ -22,7 +20,18 @@
 		{
 			"binding": "LEADS_KV",
 			"id": "e1296386396f4ecaa808991ecae3f415",
-			"remote": true
-		}
+			"remote": true,
+		},
+	],
+
+	"ratelimits": [
+		{
+			"name": "LEADS_LIMITER",
+			"namespace_id": "1001",
+			"simple": {
+				"limit": 3,
+				"period": 60,
+			},
+		},
 	],
 }
