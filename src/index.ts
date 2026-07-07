@@ -1,5 +1,7 @@
 import type { CreateLeadInput } from './interface/lead.interface';
 
+import { isRateLimited } from './utils/rateLimiter';
+
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const statuses = ['new', 'contacted', 'closed'];
 
@@ -20,6 +22,8 @@ export default {
 		const path = url.pathname;
 		const method = request.method;
 		const statusParam = url.searchParams.get('status');
+		const eventId = crypto.randomUUID();
+		const timestamp = new Date().toISOString();
 
 		let results;
 
@@ -43,15 +47,27 @@ export default {
 			if (!publishRoute) {
 				const auth = request.headers.get('Authorization');
 
-				if (!auth || auth !== `Bearer ${env.AUTH_TOKEN}`) {
+				if (!auth) {
+					return sendJson({ error: 'Неавторизовано' }, 401);
+				}
+				const encoder = new TextEncoder();
+				const expect = encoder.encode(`Bearer ${env.AUTH_TOKEN}`);
+				const provided = encoder.encode(auth);
+
+				if (expect.byteLength !== provided.byteLength || !crypto.subtle.timingSafeEqual(expect, provided)) {
 					return sendJson({ error: 'Неавторизовано' }, 401);
 				}
 			}
 			if (method === 'POST' && path === '/leads') {
 				const ip = request.headers.get('CF-Connecting-IP') || '127.0.0.1';
-				const { success } = await env.LEADS_LIMITER.limit({ key: ip });
+				// const { success } = await env.LEADS_LIMITER.limit({ key: ip });
 
-				if (!success) {
+				// if (!success) {
+				// 	return sendJson({ error: 'Перевищено ліміт запитів. Спробуйте пізніше' }, 429);
+				// }
+
+				const limitReached = await isRateLimited(env.mini_lead_tracker_db, ip);
+				if (limitReached) {
 					return sendJson({ error: 'Перевищено ліміт запитів. Спробуйте пізніше' }, 429);
 				}
 
@@ -77,8 +93,8 @@ export default {
 					.first();
 
 				if (!createdLead) {
-					console.error('Помилка при додаванні ліда:', email, new Date().toISOString());
-					return sendJson({ error: 'Внутрішня помилка сервера' }, 500);
+					console.error('Помилка при додаванні ліда:', { eventId, timestamp });
+					return sendJson({ error: 'Внутрішня помилка сервера', eventId }, 500);
 				}
 
 				ctx.waitUntil(clearCache(env));
@@ -86,7 +102,6 @@ export default {
 				const emailEnabled = await env.LEADS_KV.get('settings:lead_email_enabled');
 
 				if (emailEnabled === 'true') {
-					console.log('Пройшла відправка email:', email);
 				}
 
 				return sendJson(createdLead, 201);
@@ -209,13 +224,14 @@ export default {
 			return sendJson({ error: 'Маршрут не знайдено' }, 404);
 		} catch (error: unknown) {
 			console.error('Unhandled error:', {
+				eventId,
 				message: error instanceof Error ? error.message : 'Unknown',
 				stack: error instanceof Error ? error.stack : undefined,
 				path,
 				method,
-				timestamp: new Date().toISOString(),
+				timestamp,
 			});
-			return sendJson({ error: 'Внутрішня помилка сервера' }, 500);
+			return sendJson({ error: 'Внутрішня помилка сервера', eventId }, 500);
 		}
 	},
 } satisfies ExportedHandler<Env>;

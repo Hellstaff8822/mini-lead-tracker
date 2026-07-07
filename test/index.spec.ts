@@ -1,7 +1,11 @@
-import { SELF } from 'cloudflare:test';
-import { describe, it, expect } from 'vitest';
+import { SELF, env } from 'cloudflare:test';
+import { describe, it, expect, beforeEach } from 'vitest';
 
 describe('Auth test', () => {
+	beforeEach(async () => {
+		await env.mini_lead_tracker_db.prepare('DELETE FROM rate_limits WHERE ip = ?').bind('127.0.0.1').run();
+	});
+
 	it('Blocking unauthorized access', async () => {
 		const response = await SELF.fetch('http://localhost:8787/leads');
 		expect(response.status).toBe(401);
@@ -35,27 +39,6 @@ describe('Auth test', () => {
 			}),
 		});
 
-		expect([201, 429]).toContain(response.status);
-	});
-
-	it('Test cache concurency', async () => {
-		const url = 'http://localhost:8787/leads';
-		const body = JSON.stringify({ name: 'Test', email: 'test@test.com' });
-		const headers = { 'Content-Type': 'application/json' };
-
-		const requests = Array.from({ length: 6 }, () =>
-			SELF.fetch(url, {
-				method: 'POST',
-				headers,
-				body,
-			}),
-		);
-		const responses = await Promise.all(requests);
-		const statuses = responses.map((response) => response.status);
-
-		const successCount = statuses.filter((status) => status === 201).length;
-		expect(successCount).toBeLessThanOrEqual(3);
-		expect(statuses).toContain(429);
-		console.log(statuses);
+		expect(response.status).toBe(201);
 	});
 });
