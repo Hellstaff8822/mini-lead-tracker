@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 describe('Auth test', () => {
 	beforeEach(async () => {
 		await env.mini_lead_tracker_db.prepare('DELETE FROM rate_limits WHERE ip = ?').bind('127.0.0.1').run();
+		await env.mini_lead_tracker_db.prepare('DELETE FROM leads').run();
 	});
 
 	it('Blocking unauthorized access', async () => {
@@ -40,5 +41,27 @@ describe('Auth test', () => {
 		});
 
 		expect(response.status).toBe(201);
+	});
+
+	it('POST 3 leads and block the 4th', async () => {
+		const makeRequest = () =>
+			SELF.fetch('http://localhost:8787/leads', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify({
+					name: '',
+					email: 'smth',
+				}),
+			});
+		const res1 = await makeRequest();
+		const res2 = await makeRequest();
+		const res3 = await makeRequest();
+		expect(res1.status).toBe(400);
+		expect(res2.status).toBe(400);
+		expect(res3.status).toBe(400);
+		const res4 = await makeRequest();
+		expect(res4.status).toBe(429);
 	});
 });

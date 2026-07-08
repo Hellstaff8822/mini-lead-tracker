@@ -13,25 +13,14 @@
 			"binding": "mini_lead_tracker_db",
 			"database_name": "mini-lead-tracker-db",
 			"database_id": "43abb93c-523a-43e5-848f-00cd00abf269",
-			"remote": true,
+			// "remote": true,
 		},
 	],
 	"kv_namespaces": [
 		{
 			"binding": "LEADS_KV",
 			"id": "e1296386396f4ecaa808991ecae3f415",
-			"remote": true,
-		},
-	],
-
-	"ratelimits": [
-		{
-			"name": "LEADS_LIMITER",
-			"namespace_id": "1001",
-			"simple": {
-				"limit": 3,
-				"period": 60,
-			},
+			// "remote": true,
 		},
 	],
 }

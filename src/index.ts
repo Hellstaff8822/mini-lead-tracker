@@ -99,11 +99,6 @@ export default {
 
 				ctx.waitUntil(clearCache(env));
 
-				const emailEnabled = await env.LEADS_KV.get('settings:lead_email_enabled');
-
-				if (emailEnabled === 'true') {
-				}
-
 				return sendJson(createdLead, 201);
 			}
 
